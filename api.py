@@ -1,14 +1,11 @@
-# Run an OpenAI-Compatible vLLM Server
-from pathlib import Path
-
 import modal
 import modal.runner
 
-MODEL_NAME = "ISTA-DASLab/Meta-Llama-3-8B-Instruct-AQLM-2Bit-1x16"
+MODEL_NAME = "ISTA-DASLab/Meta-Llama-3-8B-Instruct"
 MODEL_DIR = f"/models/{MODEL_NAME}"
 SERVED_NAME = "llama3-8b-instruct"
 MINUTES = 60
-N_GPU = 1
+GPU_CONFIG = modal.gpu.A10G(count=1)
 TOKEN = "super-secret-token"
 
 
@@ -25,6 +22,7 @@ def download_model_to_image(model_dir, model_name):
     )
 
 
+app = modal.App("llama-3")
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install("vllm", "huggingface_hub", "hf-transfer")
@@ -36,23 +34,20 @@ image = (
     )
 )
 
-app = modal.App("llama3-vllm")
-local_template_path = Path(__file__).parent / "template_llama3.jinja"
-
 
 @app.function(
     image=image,
-    gpu=modal.gpu.T4(),
+    gpu=GPU_CONFIG,
     allow_concurrent_inputs=100,
-    concurrency_limit=120, # 2 minutes of idle time before shutting down
-    enable_memory_snapshot=True,
+    container_idle_timeout=300,
+    concurrency_limit=1,
 )
 @modal.asgi_app()
-def serve():
+def api():
     import fastapi
-    import vllm.entrypoints.openai.api_server as api_server
     from vllm.engine.arg_utils import AsyncEngineArgs
     from vllm.engine.async_llm_engine import AsyncLLMEngine
+    from vllm.entrypoints.openai import api_server
     from vllm.entrypoints.openai.serving_chat import OpenAIServingChat
     from vllm.entrypoints.openai.serving_completion import (
         OpenAIServingCompletion,
@@ -84,15 +79,16 @@ def serve():
     engine_args = AsyncEngineArgs(
         model=MODEL_DIR,
         served_model_name=SERVED_NAME,
-        tensor_parallel_size=N_GPU,
-        gpu_memory_utilization=0.9,
-        enforce_eager=False,
-        quantization="aqlm",
+        tensor_parallel_size=GPU_CONFIG.count,
+        gpu_memory_utilization=0.95,
+        enforce_eager=True,
         seed=0,
+        disable_log_stats=False,
+        disable_log_requests=True,
     )
 
     engine = AsyncLLMEngine.from_engine_args(
-        engine_args, 
+        engine_args,
         usage_context=UsageContext.OPENAI_API_SERVER,
     )
 
@@ -103,7 +99,8 @@ def serve():
         # chat_template="chat_template.jinja",
     )
     api_server.openai_serving_completion = OpenAIServingCompletion(
-        engine, served_model_names=[SERVED_NAME],
+        engine,
+        served_model_names=[SERVED_NAME],
     )
 
     return app
