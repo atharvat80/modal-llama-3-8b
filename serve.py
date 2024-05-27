@@ -1,7 +1,7 @@
 import modal
 import modal.runner
 
-MODEL_NAME = "ISTA-DASLab/Meta-Llama-3-8B-Instruct"
+MODEL_NAME = "meta-llama/Meta-Llama-3-8B-Instruct"
 MODEL_DIR = f"/models/{MODEL_NAME}"
 SERVED_NAME = "llama3-8b-instruct"
 MINUTES = 60
@@ -31,6 +31,7 @@ image = (
         download_model_to_image,
         timeout=20 * MINUTES,
         kwargs={"model_dir": MODEL_DIR, "model_name": MODEL_NAME},
+        secrets=[modal.Secret.from_name("huggingface-secret")],
     )
 )
 
@@ -80,11 +81,12 @@ def api():
         model=MODEL_DIR,
         served_model_name=SERVED_NAME,
         tensor_parallel_size=GPU_CONFIG.count,
-        gpu_memory_utilization=0.95,
+        gpu_memory_utilization=0.99,
         enforce_eager=True,
         seed=0,
         disable_log_stats=False,
         disable_log_requests=True,
+        enable_chunked_prefill=True,
     )
 
     engine = AsyncLLMEngine.from_engine_args(
